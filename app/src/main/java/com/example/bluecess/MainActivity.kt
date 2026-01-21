@@ -43,11 +43,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,7 +53,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -279,7 +275,7 @@ fun DeviceView(
         modifier = Modifier.fillMaxSize()
     ) {
         // Permission warning
-        if (!viewModel.hasBluetoothPermission) {
+        if (!viewModel.hasRequiredPermissions) {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -360,7 +356,7 @@ fun DeviceView(
                 if (!viewModel.isBluetoothEnabled) {
                     val enableBtIntent = Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE)
                     requestBluetoothEnable?.launch(enableBtIntent)
-                } else if (!viewModel.hasBluetoothPermission) {
+                } else if (!viewModel.hasRequiredPermissions) {
                     requestPermissionLauncher?.launch(requiredPermissions)
                 } else {
                     viewModel.startScanning(context)
@@ -593,7 +589,6 @@ fun AppRow(
 }
 
 // Helper function to get required permissions based on Android version
-// Removed @Composable annotation since it doesn't need to be composable
 fun getRequiredPermissions(): Array<String> {
     val permissions = mutableListOf<String>()
 

@@ -38,7 +38,7 @@ class BluetoothViewModel : ViewModel() {
     private var bluetoothReceiver: BroadcastReceiver? = null
     private var isReceiverRegistered = false
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var discoveryInProgress = AtomicBoolean(false)
+    private val discoveryInProgress = AtomicBoolean(false)
     private var retryCount = 0
 
     // Scan session tracking
@@ -146,6 +146,10 @@ class BluetoothViewModel : ViewModel() {
 
         hasRequiredPermissions = allGranted
         return allGranted
+    }
+
+    fun updatePermissionsState(context: Context) {
+        hasRequiredPermissions = checkPermissions(context)
     }
 
     @SuppressLint("MissingPermission")
@@ -414,7 +418,7 @@ class BluetoothViewModel : ViewModel() {
                             // Filter out devices with no name or weird addresses
                             if (shouldIncludeDevice(bluetoothDevice)) {
                                 viewModelScope.launch {
-                                    addDiscoveredDevice(bluetoothDevice, rssi)
+                                    addDiscoveredDevice(bluetoothDevice, rssi.toInt())
                                 }
                             }
                         }
@@ -502,7 +506,6 @@ class BluetoothViewModel : ViewModel() {
         }
 
         // Filter out BLE devices if we only want classic audio devices
-        // You might want to adjust this based on your needs
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             if (device.type == BluetoothDevice.DEVICE_TYPE_LE) {
                 return false // Skip BLE-only devices for audio routing

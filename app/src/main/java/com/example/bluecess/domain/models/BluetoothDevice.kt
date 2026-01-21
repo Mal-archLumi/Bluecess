@@ -5,7 +5,9 @@ data class BluetoothDevice(
     val address: String,
     val isConnected: Boolean = false,
     val isPaired: Boolean = false,
-    val deviceType: DeviceType = DeviceType.UNKNOWN
+    val deviceType: DeviceType = DeviceType.UNKNOWN,
+    val rssi: Int? = null,
+    val lastSeen: Long = System.currentTimeMillis()
 )
 
 enum class DeviceType {
