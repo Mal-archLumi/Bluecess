@@ -36,7 +36,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -45,59 +44,50 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.bluecess.ui.components.AppRow
 import com.example.bluecess.ui.components.BluetoothScanButton
 import com.example.bluecess.ui.components.ModeSelector
+import com.example.bluecess.ui.theme.BluecessBlue
 import com.example.bluecess.ui.theme.BluecessGreen
 import com.example.bluecess.ui.theme.BluecessRed
+import com.example.bluecess.ui.theme.BluecessTheme
 import com.example.bluecess.ui.theme.CardGray
 import com.example.bluecess.ui.theme.TextPrimary
 import com.example.bluecess.ui.theme.TextSecondary
 import com.example.bluecess.ui.theme.Typography
-import com.example.bluecess.ui.theme.BluecessTheme
 import com.example.bluecess.viewmodels.BluetoothViewModel
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private lateinit var bluetoothAdapter: BluetoothAdapter
 
-    // Permission request launcher
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         val allGranted = permissions.values.all { it }
-        if (allGranted) {
-            // Permissions granted
-            // You might want to trigger a scan automatically here
-        } else {
-            // Permissions denied
-            // Show message to user
-        }
+        // Trigger update in ViewModel
+        // This will be handled by the ViewModel's permission check
     }
 
-    // Bluetooth enable request launcher
     private val requestBluetoothEnable = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        // Handle Bluetooth enable result
+        // Bluetooth state will be automatically updated via broadcast receiver
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Initialize Bluetooth adapter
         val bluetoothManager = getSystemService(android.bluetooth.BluetoothManager::class.java)
         bluetoothAdapter = bluetoothManager.adapter
 
@@ -124,26 +114,15 @@ fun BluetoothApp(
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
 
-    // Get required permissions for this Android version
-    val requiredPermissions = remember {
-        getRequiredPermissions()
-    }
+    val requiredPermissions = remember { getRequiredPermissions() }
 
-    // Check permissions and Bluetooth state when app starts/resumes
     LaunchedEffect(Unit) {
         viewModel.initializeBluetooth(context)
         viewModel.updatePermissionsState(context)
-
-        // Listen for Bluetooth state changes
-        snapshotFlow { viewModel.isBluetoothEnabled }.collectLatest { isEnabled ->
-            if (!isEnabled && viewModel.isScanning) {
-                viewModel.stopScanning(context)
-            }
-        }
     }
 
-    // Handle lifecycle events
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -152,7 +131,6 @@ fun BluetoothApp(
                     viewModel.updatePermissionsState(context)
                 }
                 Lifecycle.Event.ON_PAUSE -> {
-                    // Stop scanning when app goes to background
                     if (viewModel.isScanning) {
                         viewModel.stopScanning(context)
                     }
@@ -163,18 +141,15 @@ fun BluetoothApp(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            // Clean up
             if (viewModel.isScanning) {
                 viewModel.stopScanning(context)
             }
         }
     }
 
-    // Show error messages
     LaunchedEffect(viewModel.errorMessage) {
         viewModel.errorMessage?.let { error ->
             snackbarHostState.showSnackbar(error)
-            // Clear error after showing
             viewModel.clearError()
         }
     }
@@ -184,30 +159,18 @@ fun BluetoothApp(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             CenterAlignedTopAppBar(
-                title = {
-                    Text(
-                        text = "BLUECESS",
-                        style = Typography.titleLarge
-                    )
-                },
+                title = { Text("BLUECESS", style = Typography.titleLarge) },
                 navigationIcon = {
-                    IconButton(onClick = { /* Share action */ }) {
-                        Icon(
-                            imageVector = Icons.Filled.Share,
-                            contentDescription = "Share"
-                        )
+                    IconButton(onClick = { }) {
+                        Icon(Icons.Filled.Share, contentDescription = "Share")
                     }
                 },
                 actions = {
                     IconButton(onClick = {
-                        // Navigate to settings
                         val intent = Intent(context, SettingsActivity::class.java)
                         context.startActivity(intent)
                     }) {
-                        Icon(
-                            imageVector = Icons.Filled.Settings,
-                            contentDescription = "Settings"
-                        )
+                        Icon(Icons.Filled.Settings, contentDescription = "Settings")
                     }
                 }
             )
@@ -218,7 +181,6 @@ fun BluetoothApp(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // Mode Selector
             ModeSelector(
                 selectedIndex = viewModel.selectedTab,
                 onTabSelected = { viewModel.selectedTab = it }
@@ -247,34 +209,27 @@ fun DeviceView(
     requiredPermissions: Array<String>
 ) {
     val devices = remember(viewModel.discoveredDevices, viewModel.getBondedDevices()) {
-        // Combine discovered and bonded devices
         val allDevices = mutableListOf<com.example.bluecess.domain.models.BluetoothDevice>()
-
-        // Add bonded devices first
+        
         viewModel.getBondedDevices().forEach { device ->
             if (!allDevices.any { it.address == device.address }) {
                 allDevices.add(device)
             }
         }
-
-        // Add discovered devices
+        
         viewModel.discoveredDevices.forEach { device ->
             val existingIndex = allDevices.indexOfFirst { it.address == device.address }
             if (existingIndex >= 0) {
-                // Update existing device with discovered info
                 allDevices[existingIndex] = device.copy(isPaired = allDevices[existingIndex].isPaired)
             } else {
                 allDevices.add(device)
             }
         }
-
+        
         allDevices
     }
 
-    Column(
-        modifier = Modifier.fillMaxSize()
-    ) {
-        // Permission warning
+    Column(modifier = Modifier.fillMaxSize()) {
         if (!viewModel.hasRequiredPermissions) {
             Card(
                 modifier = Modifier
@@ -285,9 +240,7 @@ fun DeviceView(
                     containerColor = Color.Yellow.copy(alpha = 0.1f)
                 )
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
-                ) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = "Permissions Required",
                         style = Typography.bodyMedium,
@@ -300,9 +253,7 @@ fun DeviceView(
                         modifier = Modifier.padding(top = 4.dp)
                     )
                     Button(
-                        onClick = {
-                            requestPermissionLauncher?.launch(requiredPermissions)
-                        },
+                        onClick = { requestPermissionLauncher?.launch(requiredPermissions) },
                         modifier = Modifier.padding(top = 8.dp)
                     ) {
                         Text("Grant Permissions")
@@ -311,7 +262,6 @@ fun DeviceView(
             }
         }
 
-        // Bluetooth disabled warning
         if (!viewModel.isBluetoothEnabled) {
             Card(
                 modifier = Modifier
@@ -322,9 +272,7 @@ fun DeviceView(
                     containerColor = Color.Red.copy(alpha = 0.1f)
                 )
             ) {
-                Column(
-                    modifier = Modifier.padding(16.dp)
-                ) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = "Bluetooth Disabled",
                         style = Typography.bodyMedium,
@@ -338,7 +286,7 @@ fun DeviceView(
                     )
                     Button(
                         onClick = {
-                            val enableBtIntent = Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                            val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
                             requestBluetoothEnable?.launch(enableBtIntent)
                         },
                         modifier = Modifier.padding(top = 8.dp)
@@ -349,12 +297,11 @@ fun DeviceView(
             }
         }
 
-        // Bluetooth Scan Button
         BluetoothScanButton(
             isScanning = viewModel.isScanning,
             onClick = {
                 if (!viewModel.isBluetoothEnabled) {
-                    val enableBtIntent = Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                    val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
                     requestBluetoothEnable?.launch(enableBtIntent)
                 } else if (!viewModel.hasRequiredPermissions) {
                     requestPermissionLauncher?.launch(requiredPermissions)
@@ -364,9 +311,7 @@ fun DeviceView(
             }
         )
 
-        // Device List
         if (devices.isEmpty() && !viewModel.isScanning) {
-            // Show empty state
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -399,13 +344,7 @@ fun DeviceView(
                         }
                     )
                 }
-
-                // Add some spacing at the bottom
-                item {
-                    Box(
-                        modifier = Modifier.height(32.dp)
-                    )
-                }
+                item { Box(modifier = Modifier.height(32.dp)) }
             }
         }
     }
@@ -423,9 +362,7 @@ fun DeviceCard(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = CardGray
-        ),
+        colors = CardDefaults.cardColors(containerColor = CardGray),
         elevation = CardDefaults.cardElevation(0.dp)
     ) {
         Row(
@@ -459,8 +396,6 @@ fun DeviceCard(
                     }
                 }
             }
-
-            // Status indicator dot
             Box(
                 modifier = Modifier
                     .size(12.dp)
@@ -475,7 +410,6 @@ fun DeviceCard(
 
 @Composable
 fun AppView() {
-    // Mock data for apps
     val apps = remember {
         mutableStateListOf(
             AppInfo("Instagram", true),
@@ -487,19 +421,14 @@ fun AppView() {
         )
     }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize()
-    ) {
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
         items(items = apps) { app ->
             AppRow(
                 appName = app.name,
-                appIcon = android.R.drawable.sym_def_app_icon, // Placeholder
                 isEnabled = app.isEnabled,
                 onToggle = { enabled ->
                     val index = apps.indexOf(app)
                     apps[index] = app.copy(isEnabled = enabled)
-
-                    // Only allow one app to be enabled at a time
                     if (enabled) {
                         apps.forEachIndexed { i, otherApp ->
                             if (i != index) {
@@ -510,20 +439,13 @@ fun AppView() {
                 }
             )
         }
-
-        // Add some spacing at the bottom
-        item {
-            Box(
-                modifier = Modifier.height(32.dp)
-            )
-        }
+        item { Box(modifier = Modifier.height(32.dp)) }
     }
 }
 
 @Composable
 fun AppRow(
     appName: String,
-    appIcon: Int,
     isEnabled: Boolean,
     onToggle: (Boolean) -> Unit,
     modifier: Modifier = Modifier
@@ -533,9 +455,7 @@ fun AppRow(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = CardGray
-        ),
+        colors = CardDefaults.cardColors(containerColor = CardGray),
         elevation = CardDefaults.cardElevation(0.dp)
     ) {
         Row(
@@ -545,21 +465,16 @@ fun AppRow(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // App icon and name
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Placeholder for app icon
-                Surface(
-                    modifier = Modifier
-                        .size(40.dp),
+                androidx.compose.material3.Surface(
+                    modifier = Modifier.size(40.dp),
                     shape = RoundedCornerShape(8.dp),
                     color = Color.LightGray
                 ) {
-                    Box(
-                        contentAlignment = Alignment.Center
-                    ) {
+                    Box(contentAlignment = Alignment.Center) {
                         Text(
                             text = appName.first().toString(),
                             style = Typography.titleLarge,
@@ -567,15 +482,12 @@ fun AppRow(
                         )
                     }
                 }
-
                 Text(
                     text = appName,
                     style = Typography.bodyMedium,
                     color = TextPrimary
                 )
             }
-
-            // Toggle switch
             Switch(
                 checked = isEnabled,
                 onCheckedChange = onToggle,
@@ -588,36 +500,20 @@ fun AppRow(
     }
 }
 
-// Helper function to get required permissions based on Android version
 fun getRequiredPermissions(): Array<String> {
     val permissions = mutableListOf<String>()
-
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        // Android 12+
         permissions.add(Manifest.permission.BLUETOOTH_SCAN)
         permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
-        // Android 12+ also needs notification permission for foreground service
-        permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
     } else {
-        // Android 6-11
         permissions.add(Manifest.permission.BLUETOOTH)
         permissions.add(Manifest.permission.BLUETOOTH_ADMIN)
         permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
     }
-
     return permissions.toTypedArray()
 }
 
-// Data class for AppInfo
-data class AppInfo(
-    val name: String,
-    val isEnabled: Boolean
-)
-
-@Preview(showBackground = true)
-@Composable
-fun BluetoothAppPreview() {
-    BluecessTheme {
-        BluetoothApp()
-    }
-}
+data class AppInfo(val name: String, val isEnabled: Boolean)
