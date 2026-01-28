@@ -31,7 +31,9 @@ class BluetoothViewModel : ViewModel() {
 
     private var bluetoothAdapter: BluetoothAdapter? = null
     private var bluetoothReceiver: BroadcastReceiver? = null
+    private var connectionReceiver: BroadcastReceiver? = null
     private var isReceiverRegistered = false
+    private var isConnectionReceiverRegistered = false
     private var applicationContext: Context? = null
 
     var isBluetoothEnabled by mutableStateOf(false)
@@ -73,6 +75,7 @@ class BluetoothViewModel : ViewModel() {
             } else {
                 updateBluetoothState()
                 registerBluetoothStateReceiver(context)
+                registerConnectionStateReceiver(context)
                 Log.d(TAG, "Bluetooth initialized. Enabled: $isBluetoothEnabled")
             }
         } catch (e: Exception) {
@@ -115,6 +118,98 @@ class BluetoothViewModel : ViewModel() {
         }
     }
 
+    private fun registerConnectionStateReceiver(context: Context) {
+        try {
+            connectionReceiver = object : BroadcastReceiver() {
+                @SuppressLint("MissingPermission")
+                override fun onReceive(context: Context, intent: Intent) {
+                    when (intent.action) {
+                        BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                            val device: BluetoothDevice? = 
+                                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                            device?.let {
+                                Log.i(TAG, "Device connected: ${it.name} (${it.address})")
+                                updateDeviceConnectionState(it.address, true)
+                            }
+                        }
+                        BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                            val device: BluetoothDevice? = 
+                                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                            device?.let {
+                                Log.i(TAG, "Device disconnected: ${it.name} (${it.address})")
+                                updateDeviceConnectionState(it.address, false)
+                            }
+                        }
+                        BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
+                            val device: BluetoothDevice? = 
+                                intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                            val bondState = intent.getIntExtra(
+                                BluetoothDevice.EXTRA_BOND_STATE,
+                                BluetoothDevice.BOND_NONE
+                            )
+                            device?.let {
+                                when (bondState) {
+                                    BluetoothDevice.BOND_BONDED -> {
+                                        Log.i(TAG, "Device paired: ${it.name}")
+                                        updateDevicePairedState(it.address, true)
+                                    }
+                                    BluetoothDevice.BOND_NONE -> {
+                                        Log.i(TAG, "Device unpaired: ${it.name}")
+                                        updateDevicePairedState(it.address, false)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            val filter = IntentFilter().apply {
+                addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+                addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+                addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+            }
+
+            context.registerReceiver(connectionReceiver, filter)
+            isConnectionReceiverRegistered = true
+            Log.d(TAG, "Connection state receiver registered")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register connection receiver", e)
+        }
+    }
+
+    private fun updateDeviceConnectionState(address: String, isConnected: Boolean) {
+        discoveredDevices = discoveredDevices.map {
+            if (it.address == address) {
+                it.copy(isConnected = isConnected)
+            } else {
+                it
+            }
+        }
+
+        if (isConnected) {
+            val device = discoveredDevices.find { it.address == address }
+            device?.let {
+                if (!connectedDevices.any { d -> d.address == address }) {
+                    connectedDevices = connectedDevices + it.copy(isConnected = true)
+                }
+            }
+        } else {
+            connectedDevices = connectedDevices.filterNot { it.address == address }
+        }
+    }
+
+    private fun updateDevicePairedState(address: String, isPaired: Boolean) {
+        discoveredDevices = discoveredDevices.map {
+            if (it.address == address) {
+                it.copy(isPaired = isPaired)
+            } else {
+                it
+            }
+        }
+    }
+
     fun updateBluetoothState() {
         bluetoothAdapter?.let {
             isBluetoothEnabled = it.isEnabled
@@ -129,7 +224,8 @@ class BluetoothViewModel : ViewModel() {
             permissionsToCheck.addAll(
                 listOf(
                     Manifest.permission.BLUETOOTH_SCAN,
-                    Manifest.permission.BLUETOOTH_CONNECT
+                    Manifest.permission.BLUETOOTH_CONNECT,
+                    Manifest.permission.ACCESS_FINE_LOCATION // Still needed on Android 12+
                 )
             )
         } else {
@@ -143,13 +239,19 @@ class BluetoothViewModel : ViewModel() {
         }
 
         val allGranted = permissionsToCheck.all { permission ->
-            ActivityCompat.checkSelfPermission(
+            val granted = ActivityCompat.checkSelfPermission(
                 context,
                 permission
             ) == PackageManager.PERMISSION_GRANTED
+            
+            if (!granted) {
+                Log.w(TAG, "Permission not granted: $permission")
+            }
+            granted
         }
 
         hasRequiredPermissions = allGranted
+        Log.d(TAG, "Permissions check: $allGranted")
         return allGranted
     }
 
@@ -180,7 +282,7 @@ class BluetoothViewModel : ViewModel() {
         }
 
         if (!checkPermissions(context)) {
-            errorMessage = "Please grant all required permissions"
+            errorMessage = "Missing required permissions. Please grant all Bluetooth and Location permissions."
             Log.w(TAG, "Missing required permissions")
             return
         }
@@ -199,8 +301,11 @@ class BluetoothViewModel : ViewModel() {
                 discoveredDevices = emptyList()
                 errorMessage = null
 
-                // Register receiver for discovery
+                // Register receiver for discovery BEFORE starting
                 registerDiscoveryReceiver(context)
+                
+                // Small delay to ensure receiver is registered
+                delay(100)
 
                 // Start discovery
                 Log.d(TAG, "Starting Bluetooth discovery")
@@ -219,13 +324,13 @@ class BluetoothViewModel : ViewModel() {
                         }
                     }
                 } else {
-                    errorMessage = "Failed to start discovery. Please try again."
+                    errorMessage = "Failed to start discovery. Please check permissions and try again."
                     Log.e(TAG, "startDiscovery returned false")
                     unregisterDiscoveryReceiver(context)
                 }
 
             } catch (e: SecurityException) {
-                errorMessage = "Bluetooth permission denied"
+                errorMessage = "Bluetooth permission denied. Please grant all permissions."
                 Log.e(TAG, "SecurityException during discovery", e)
                 unregisterDiscoveryReceiver(context)
             } catch (e: Exception) {
@@ -253,9 +358,15 @@ class BluetoothViewModel : ViewModel() {
 
             cleanupScan(context)
 
+            // Show bonded devices if no devices were discovered
             if (discoveredDevices.isEmpty()) {
-                discoveredDevices = getBondedDevices()
-                Log.d(TAG, "No devices found, showing bonded devices: ${discoveredDevices.size}")
+                val bondedDevices = getBondedDevices()
+                if (bondedDevices.isNotEmpty()) {
+                    discoveredDevices = bondedDevices
+                    Log.d(TAG, "No devices discovered, showing ${bondedDevices.size} bonded devices")
+                } else {
+                    Log.d(TAG, "No devices found at all")
+                }
             }
 
             Log.i(TAG, "Scan stopped. Total devices: ${discoveredDevices.size}")
@@ -275,6 +386,7 @@ class BluetoothViewModel : ViewModel() {
     }
 
     private fun registerDiscoveryReceiver(context: Context) {
+        // Always unregister first to avoid duplicates
         unregisterDiscoveryReceiver(context)
 
         bluetoothReceiver = object : BroadcastReceiver() {
@@ -290,8 +402,11 @@ class BluetoothViewModel : ViewModel() {
                         ).toInt()
 
                         device?.let { btDevice ->
+                            Log.d(TAG, "Device found: ${btDevice.name ?: "Unknown"} (${btDevice.address})")
                             if (shouldIncludeDevice(btDevice)) {
                                 addDiscoveredDevice(btDevice, rssi)
+                            } else {
+                                Log.d(TAG, "Device filtered out: ${btDevice.name}")
                             }
                         }
                     }
@@ -302,7 +417,7 @@ class BluetoothViewModel : ViewModel() {
                     }
 
                     BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> {
-                        Log.d(TAG, "Discovery finished broadcast received")
+                        Log.d(TAG, "Discovery finished broadcast received. Found ${discoveredDevices.size} devices")
                         viewModelScope.launch {
                             delay(500)
                             if (isScanning) {
@@ -348,12 +463,22 @@ class BluetoothViewModel : ViewModel() {
 
     @SuppressLint("MissingPermission")
     private fun shouldIncludeDevice(device: BluetoothDevice): Boolean {
-        if (device.name.isNullOrEmpty()) return false
-        if (device.address.isNullOrEmpty() || device.address == "00:00:00:00:00:00") return false
+        // Must have a name
+        if (device.name.isNullOrEmpty()) {
+            Log.d(TAG, "Filtering out device with no name: ${device.address}")
+            return false
+        }
+        
+        // Must have valid address
+        if (device.address.isNullOrEmpty() || device.address == "00:00:00:00:00:00") {
+            Log.d(TAG, "Filtering out device with invalid address")
+            return false
+        }
 
         // Include all classic and dual-mode devices, skip BLE-only
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             if (device.type == BluetoothDevice.DEVICE_TYPE_LE) {
+                Log.d(TAG, "Filtering out BLE-only device: ${device.name}")
                 return false
             }
         }
@@ -372,7 +497,7 @@ class BluetoothViewModel : ViewModel() {
             discoveredDevices = deviceCache.values
                 .sortedByDescending { it.rssi ?: -100 }
 
-            Log.d(TAG, "Device discovered: ${device.name} (${device.address}) RSSI: $rssi")
+            Log.i(TAG, "Device added: ${device.name} (${device.address}) RSSI: $rssi, Total: ${discoveredDevices.size}")
         }
     }
 
@@ -384,13 +509,16 @@ class BluetoothViewModel : ViewModel() {
                 return emptyList()
             }
 
-            bluetoothAdapter?.bondedDevices?.mapNotNull { device ->
+            val bonded = bluetoothAdapter?.bondedDevices?.mapNotNull { device ->
                 if (shouldIncludeDevice(device)) {
                     convertToDomainBluetoothDevice(device)
                 } else {
                     null
                 }
             }?.toList() ?: emptyList()
+            
+            Log.d(TAG, "Retrieved ${bonded.size} bonded devices")
+            bonded
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException getting bonded devices", e)
             emptyList()
@@ -411,7 +539,7 @@ class BluetoothViewModel : ViewModel() {
             isConnected = false,
             isPaired = device.bondState == BluetoothDevice.BOND_BONDED,
             deviceType = detectDeviceType(device),
-            rssi = rssi,
+            rssi = if (rssi != 0) rssi else null,
             lastSeen = System.currentTimeMillis()
         )
     }
@@ -440,30 +568,109 @@ class BluetoothViewModel : ViewModel() {
         }
     }
 
+    @SuppressLint("MissingPermission")
     fun connectToDevice(device: DomainBluetoothDevice) {
         viewModelScope.launch {
             try {
-                val updatedDevice = device.copy(isConnected = true)
-                connectedDevices = connectedDevices + updatedDevice
-                discoveredDevices = discoveredDevices.map {
-                    if (it.address == device.address) updatedDevice else it
+                if (!checkPermissions(applicationContext ?: return@launch)) {
+                    errorMessage = "Missing permissions to connect"
+                    return@launch
                 }
-                Log.i(TAG, "Connected to ${device.name}")
+
+                val bluetoothDevice = bluetoothAdapter?.getRemoteDevice(device.address)
+                
+                if (bluetoothDevice == null) {
+                    errorMessage = "Device not found"
+                    Log.e(TAG, "Could not get remote device for ${device.address}")
+                    return@launch
+                }
+
+                // Check if device is already paired
+                if (bluetoothDevice.bondState == BluetoothDevice.BOND_NONE) {
+                    // Device not paired - initiate pairing
+                    Log.i(TAG, "Initiating pairing with ${device.name}")
+                    val pairingResult = bluetoothDevice.createBond()
+                    
+                    if (pairingResult) {
+                        Log.i(TAG, "Pairing initiated for ${device.name}")
+                        // The connection state will be updated via broadcast receiver
+                        // when pairing completes
+                    } else {
+                        errorMessage = "Failed to initiate pairing with ${device.name}"
+                        Log.e(TAG, "createBond() returned false for ${device.name}")
+                    }
+                } else {
+                    // Device is already paired
+                    Log.i(TAG, "Device ${device.name} is already paired")
+                    
+                    // For already paired devices, we just update the UI
+                    // The actual audio connection happens automatically for audio devices
+                    // or you can trigger specific profile connections here
+                    
+                    // Update UI to show connected (this will be corrected by broadcast receiver
+                    // if the device isn't actually connected)
+                    updateDeviceConnectionState(device.address, true)
+                }
+
+            } catch (e: SecurityException) {
+                errorMessage = "Permission denied for connecting"
+                Log.e(TAG, "SecurityException connecting to device", e)
             } catch (e: Exception) {
-                Log.e(TAG, "Error connecting to device", e)
                 errorMessage = "Failed to connect: ${e.message}"
+                Log.e(TAG, "Error connecting to device", e)
             }
         }
     }
 
+    @SuppressLint("MissingPermission")
     fun disconnectDevice(device: DomainBluetoothDevice) {
         viewModelScope.launch {
-            val updatedDevice = device.copy(isConnected = false)
-            connectedDevices = connectedDevices.filterNot { it.address == device.address }
-            discoveredDevices = discoveredDevices.map {
-                if (it.address == device.address) updatedDevice else it
+            try {
+                if (!checkPermissions(applicationContext ?: return@launch)) {
+                    errorMessage = "Missing permissions to disconnect"
+                    return@launch
+                }
+
+                // Note: Android doesn't provide a direct API to disconnect Bluetooth devices
+                // Disconnection typically happens through:
+                // 1. System Bluetooth settings
+                // 2. Device going out of range
+                // 3. Device being turned off
+                
+                // For now, we can only unpair (remove bond)
+                val bluetoothDevice = bluetoothAdapter?.getRemoteDevice(device.address)
+                
+                if (bluetoothDevice != null && device.isPaired) {
+                    // Attempt to remove pairing using reflection
+                    // (There's no official API for this)
+                    try {
+                        val method = bluetoothDevice.javaClass.getMethod("removeBond")
+                        val result = method.invoke(bluetoothDevice) as? Boolean
+                        
+                        if (result == true) {
+                            Log.i(TAG, "Removed pairing for ${device.name}")
+                            updateDeviceConnectionState(device.address, false)
+                            updateDevicePairedState(device.address, false)
+                        } else {
+                            errorMessage = "Could not unpair ${device.name}. Use system Bluetooth settings."
+                            Log.w(TAG, "removeBond returned false for ${device.name}")
+                        }
+                    } catch (e: Exception) {
+                        errorMessage = "Cannot disconnect from system. Use Bluetooth settings."
+                        Log.e(TAG, "Error calling removeBond", e)
+                        // Fallback: just update UI
+                        updateDeviceConnectionState(device.address, false)
+                    }
+                } else {
+                    // Just update UI state
+                    updateDeviceConnectionState(device.address, false)
+                    Log.i(TAG, "Updated UI state for ${device.name}")
+                }
+
+            } catch (e: Exception) {
+                errorMessage = "Error disconnecting: ${e.message}"
+                Log.e(TAG, "Error disconnecting device", e)
             }
-            Log.i(TAG, "Disconnected from ${device.name}")
         }
     }
 
@@ -476,6 +683,16 @@ class BluetoothViewModel : ViewModel() {
         applicationContext?.let { context ->
             if (isScanning) {
                 stopScanning(context)
+            }
+            
+            if (isConnectionReceiverRegistered && connectionReceiver != null) {
+                try {
+                    context.unregisterReceiver(connectionReceiver)
+                    isConnectionReceiverRegistered = false
+                    Log.d(TAG, "Connection receiver unregistered")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error unregistering connection receiver", e)
+                }
             }
         }
         Log.d(TAG, "ViewModel cleared")

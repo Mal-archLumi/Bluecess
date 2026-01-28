@@ -503,12 +503,16 @@ fun AppRow(
 fun getRequiredPermissions(): Array<String> {
     val permissions = mutableListOf<String>()
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        // Android 12+
         permissions.add(Manifest.permission.BLUETOOTH_SCAN)
         permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+        // Location is still needed for discovering nearby devices even on Android 12+
+        permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
     } else {
+        // Android 11 and below
         permissions.add(Manifest.permission.BLUETOOTH)
         permissions.add(Manifest.permission.BLUETOOTH_ADMIN)
         permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
