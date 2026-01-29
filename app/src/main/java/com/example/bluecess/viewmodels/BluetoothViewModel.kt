@@ -217,42 +217,56 @@ class BluetoothViewModel : ViewModel() {
         }
     }
 
-    fun checkPermissions(context: Context): Boolean {
-        val permissionsToCheck = mutableListOf<String>()
-
+    // Separate permission checking methods
+    fun checkLocationPermission(context: Context): Boolean {
+        val grantedFineLocation = ActivityCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        
+        val grantedCoarseLocation = ActivityCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        
+        return grantedFineLocation || grantedCoarseLocation
+    }
+    
+    fun checkBluetoothPermission(context: Context): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            permissionsToCheck.addAll(
-                listOf(
-                    Manifest.permission.BLUETOOTH_SCAN,
-                    Manifest.permission.BLUETOOTH_CONNECT,
-                    Manifest.permission.ACCESS_FINE_LOCATION // Still needed on Android 12+
-                )
-            )
-        } else {
-            permissionsToCheck.addAll(
-                listOf(
-                    Manifest.permission.BLUETOOTH,
-                    Manifest.permission.BLUETOOTH_ADMIN,
-                    Manifest.permission.ACCESS_FINE_LOCATION
-                )
-            )
-        }
-
-        val allGranted = permissionsToCheck.all { permission ->
-            val granted = ActivityCompat.checkSelfPermission(
+            val grantedScan = ActivityCompat.checkSelfPermission(
                 context,
-                permission
+                Manifest.permission.BLUETOOTH_SCAN
             ) == PackageManager.PERMISSION_GRANTED
             
-            if (!granted) {
-                Log.w(TAG, "Permission not granted: $permission")
-            }
-            granted
+            val grantedConnect = ActivityCompat.checkSelfPermission(
+                context,
+                Manifest.permission.BLUETOOTH_CONNECT
+            ) == PackageManager.PERMISSION_GRANTED
+            
+            return grantedScan && grantedConnect
+        } else {
+            val grantedBluetooth = ActivityCompat.checkSelfPermission(
+                context,
+                Manifest.permission.BLUETOOTH
+            ) == PackageManager.PERMISSION_GRANTED
+            
+            val grantedBluetoothAdmin = ActivityCompat.checkSelfPermission(
+                context,
+                Manifest.permission.BLUETOOTH_ADMIN
+            ) == PackageManager.PERMISSION_GRANTED
+            
+            return grantedBluetooth && grantedBluetoothAdmin
         }
+    }
 
-        hasRequiredPermissions = allGranted
-        Log.d(TAG, "Permissions check: $allGranted")
-        return allGranted
+    fun checkPermissions(context: Context): Boolean {
+        val locationGranted = checkLocationPermission(context)
+        val bluetoothGranted = checkBluetoothPermission(context)
+        
+        hasRequiredPermissions = locationGranted && bluetoothGranted
+        Log.d(TAG, "Permissions check - Location: $locationGranted, Bluetooth: $bluetoothGranted")
+        return hasRequiredPermissions
     }
 
     fun updatePermissionsState(context: Context) {

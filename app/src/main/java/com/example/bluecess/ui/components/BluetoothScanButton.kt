@@ -34,7 +34,7 @@ import com.example.bluecess.ui.theme.Typography
 @Composable
 fun BluetoothScanButton(
     isScanning: Boolean,
-    onClick: () -> Unit, // Changed from @Composable () -> Unit to () -> Unit
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "scanning")
@@ -48,7 +48,7 @@ fun BluetoothScanButton(
         ),
         label = "rotation"
     )
-
+    
     Column(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -57,7 +57,7 @@ fun BluetoothScanButton(
 
         // Bluetooth Button
         androidx.compose.material3.Surface(
-            onClick = onClick, // Now this works correctly
+            onClick = onClick,
             modifier = Modifier.size(120.dp),
             shape = CircleShape,
             color = BluecessBlue,
